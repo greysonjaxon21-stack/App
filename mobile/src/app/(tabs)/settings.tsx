@@ -1,9 +1,9 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Button, Card, Field, SectionTitle } from "../../components/ui";
-import { checkServer } from "../../lib/api.ts";
+import { Button, Card, ConfirmButton, Field, SectionTitle } from "../../components/ui";
+import { checkServer, hasArtifactRuntime } from "../../lib/api.ts";
 import { formatHeight, formatWeight } from "../../lib/nutrition.ts";
 import { defaultApiUrl, useStore } from "../../lib/store.tsx";
 import { colors } from "../../lib/theme.ts";
@@ -22,18 +22,6 @@ export default function Settings() {
     setStatus("Checking…");
     const ok = await checkServer(cleaned || defaultApiUrl());
     setStatus(ok ? "✅ Connected" : "❌ Can't reach the server");
-  };
-
-  const reset = () => {
-    const go = () => resetAll();
-    if (Platform.OS === "web") {
-      if (window.confirm("Delete all your data and start over?")) go();
-    } else {
-      Alert.alert("Reset everything?", "This deletes your profile, food log and weight history.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Reset", style: "destructive", onPress: go },
-      ]);
-    }
   };
 
   return (
@@ -67,6 +55,15 @@ export default function Settings() {
           />
         </Card>
 
+        {hasArtifactRuntime() ? (
+          <>
+            <SectionTitle>AI analysis</SectionTitle>
+            <Card>
+              <Text style={s.small}>Meals are analyzed by Claude using your Claude account. Your log is saved in this browser only.</Text>
+            </Card>
+          </>
+        ) : (
+        <>
         <SectionTitle>AI server</SectionTitle>
         <Card style={{ gap: 12 }}>
           <Text style={s.small}>Photos are analyzed by your Plately server. Currently using: {apiUrl}</Text>
@@ -75,9 +72,11 @@ export default function Settings() {
           <Button title="Save & test connection" variant="secondary" onPress={saveServer} />
           {status ? <Text style={s.small}>{status}</Text> : null}
         </Card>
+        </>
+        )}
 
         <View style={{ height: 12 }} />
-        <Button title="Reset all data" variant="danger" onPress={reset} />
+        <ConfirmButton title="Reset all data" confirmTitle="Tap again to erase everything" onConfirm={() => resetAll()} />
       </ScrollView>
     </SafeAreaView>
   );

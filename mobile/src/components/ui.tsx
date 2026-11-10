@@ -117,6 +117,29 @@ export function Field({ label, suffix, ...props }: TextInputProps & { label?: st
   );
 }
 
+/** A button that asks for a second tap before running a destructive action. */
+export function ConfirmButton({ title, confirmTitle, onConfirm, style }: { title: string; confirmTitle: string; onConfirm: () => void; style?: StyleProp<ViewStyle> }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <Button
+      title={armed ? confirmTitle : title}
+      variant="danger"
+      style={style}
+      onPress={() => {
+        if (armed) {
+          setArmed(false);
+          onConfirm();
+        } else setArmed(true);
+      }}
+    />
+  );
+}
+
 /** Numeric input that keeps the raw text while typing (so "12." stays editable). */
 export function NumberField({
   value,

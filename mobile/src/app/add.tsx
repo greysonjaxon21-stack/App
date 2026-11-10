@@ -1,17 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Button } from "../components/ui";
 import { prepareImage, pickImage } from "../lib/image.ts";
 import { dayKey } from "../lib/nutrition.ts";
 import { setPendingScan } from "../lib/pending.ts";
 import { colors, radius, shadow } from "../lib/theme.ts";
-
-function showError(message: string) {
-  if (Platform.OS === "web") window.alert(message);
-  else Alert.alert("Oops", message);
-}
 
 export default function AddFood() {
   const params = useLocalSearchParams<{ date?: string }>();
@@ -19,8 +14,10 @@ export default function AddFood() {
   const [busy, setBusy] = useState(false);
   const [describe, setDescribe] = useState(false);
   const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const fromImage = async (source: "camera" | "library") => {
+    setError(null);
     try {
       const asset = await pickImage(source);
       if (!asset) return;
@@ -29,7 +26,7 @@ export default function AddFood() {
       setPendingScan({ date, imageBase64: img.base64, previewUri: img.previewUri, thumb: img.thumb });
       router.replace("/analyze");
     } catch (e) {
-      showError((e as Error).message);
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -72,6 +69,7 @@ export default function AddFood() {
 
   return (
     <ScrollView contentContainerStyle={s.content}>
+      {error ? <Text style={s.error}>{error}</Text> : null}
       <View style={s.grid}>
         <Tile icon="scan" label="Scan food" sub="Take a photo" onPress={() => fromImage("camera")} />
         <Tile icon="images" label="Photo library" sub="Pick a photo" onPress={() => fromImage("library")} />
@@ -102,6 +100,7 @@ const s = StyleSheet.create({
   tileLabel: { fontSize: 17, fontWeight: "700", color: colors.text, marginTop: 8 },
   tileSub: { fontSize: 13, color: colors.muted },
   title: { fontSize: 24, fontWeight: "800", color: colors.text },
+  error: { fontSize: 15, color: "#E5484D", lineHeight: 21 },
   muted: { fontSize: 15, color: colors.muted, lineHeight: 21 },
   textArea: {
     minHeight: 140,
