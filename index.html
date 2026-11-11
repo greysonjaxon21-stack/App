@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>Band Tuner</title>
+<style>
+  :root {
+    --bg: #f4f2ee;
+    --surface: #ffffff;
+    --text: #1b1d21;
+    --muted: #6b6f78;
+    --line: #dcd8d0;
+    --flat: #2f6fdb;
+    --sharp: #d9482b;
+    --good: #1f9d55;
+    --accent: #1b1d21;
+    --accent-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111418;
+      --surface: #1a1e24;
+      --text: #eef0f3;
+      --muted: #9097a3;
+      --line: #2b313a;
+      --flat: #5b95ff;
+      --sharp: #ff7255;
+      --good: #3ddc84;
+      --accent: #eef0f3;
+      --accent-text: #111418;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111418; --surface: #1a1e24; --text: #eef0f3; --muted: #9097a3; --line: #2b313a;
+    --flat: #5b95ff; --sharp: #ff7255; --good: #3ddc84; --accent: #eef0f3; --accent-text: #111418;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  }
+  main { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 16px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; }
+  h1 { font-size: 1.25rem; margin: 0; letter-spacing: 0.02em; }
+  .hint { color: var(--muted); font-size: 0.85rem; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 20px 16px;
+  }
+
+  /* Display */
+  #display { text-align: center; position: relative; }
+  #note {
+    font-size: clamp(5rem, 28vw, 8.5rem);
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    transition: color 0.15s;
+  }
+  #note sub { font-size: 0.3em; font-weight: 500; color: var(--muted); vertical-align: baseline; margin-left: 2px; }
+  #status {
+    margin-top: 8px;
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    min-height: 2rem;
+  }
+  #advice { color: var(--muted); min-height: 1.3rem; margin-top: 2px; }
+  #freq { color: var(--muted); font-size: 0.85rem; margin-top: 10px; font-variant-numeric: tabular-nums; min-height: 1.1rem; }
+
+  .flat  #note, .flat  #status { color: var(--flat); }
+  .sharp #note, .sharp #status { color: var(--sharp); }
+  .in-tune #note, .in-tune #status { color: var(--good); }
+  .idle #note { color: var(--line); }
+
+  /* Meter */
+  .meter { position: relative; height: 64px; margin: 20px 4px 4px; }
+  .scale { position: absolute; inset: 0; }
+  .zone {
+    position: absolute; top: 14px; bottom: 14px; left: 50%;
+    background: color-mix(in srgb, var(--good) 22%, transparent);
+    border-radius: 6px;
+    transform: translateX(-50%);
+  }
+  .tick { position: absolute; top: 20px; bottom: 20px; width: 2px; background: var(--line); transform: translateX(-1px); }
+  .tick.major { top: 10px; bottom: 10px; background: var(--muted); }
+  .tick.center { top: 2px; bottom: 2px; width: 3px; background: var(--good); transform: translateX(-1.5px); }
+  .labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.75rem; margin: 0 -4px; font-variant-numeric: tabular-nums; }
+  #needle {
+    position: absolute; top: 0; bottom: 0; left: 50%; width: 6px; margin-left: -3px;
+    border-radius: 3px; background: var(--text);
+    transition: left 0.08s linear, background 0.15s, opacity 0.2s;
+  }
+  .idle #needle { opacity: 0.15; }
+  .flat #needle { background: var(--flat); }
+  .sharp #needle { background: var(--sharp); }
+  .in-tune #needle { background: var(--good); }
+  #cents { text-align: center; font-variant-numeric: tabular-nums; color: var(--muted); margin-top: 6px; }
+
+  /* Buttons & controls */
+  button, select {
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    min-height: 44px;
+    padding: 0 14px;
+  }
+  button { cursor: pointer; }
+  button.primary {
+    width: 100%;
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+    font-weight: 600;
+    font-size: 1.1rem;
+    min-height: 56px;
+  }
+  button:focus-visible, select:focus-visible { outline: 3px solid var(--flat); outline-offset: 2px; }
+  button.playing { background: var(--good); color: #fff; border-color: var(--good); }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row > label { flex: 1 1 140px; display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+  .row select { width: 100%; }
+  .stepper { display: flex; align-items: center; gap: 6px; }
+  .stepper button { width: 44px; padding: 0; }
+  .stepper output { min-width: 4.2em; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+  h2 { font-size: 0.95rem; margin: 0 0 12px; }
+  .ref-row { display: flex; gap: 10px; }
+  .ref-row select { flex: 1; }
+  .ref-row button { flex: 1; font-weight: 600; }
+
+  #error { color: var(--sharp); font-size: 0.9rem; display: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Band Tuner</h1>
+    <span class="hint" id="instLabel">Concert pitch</span>
+  </header>
+
+  <section class="card idle" id="display" aria-live="polite">
+    <div id="note">–</div>
+    <div id="status">Ready</div>
+    <div id="advice">Tap Start, then play a long, steady note</div>
+
+    <div class="meter" aria-hidden="true">
+      <div class="scale" id="scale"><div class="zone" id="zone"></div></div>
+      <div id="needle"></div>
+    </div>
+    <div class="labels" aria-hidden="true"><span>−50</span><span>−25</span><span>0</span><span>+25</span><span>+50</span></div>
+    <div id="cents">cents</div>
+    <div id="freq"></div>
+  </section>
+
+  <button class="primary" id="startBtn">Start tuning</button>
+  <div id="error" role="alert"></div>
+
+  <section class="card">
+    <div class="row">
+      <label>Instrument key
+        <select id="instrument">
+          <option value="0">Concert C (flute, oboe, trombone, tuba, mallets)</option>
+          <option value="2">B♭ (clarinet, trumpet, tenor sax, baritone T.C.)</option>
+          <option value="9">E♭ (alto sax, bari sax, E♭ clarinet)</option>
+          <option value="7">F (French horn)</option>
+        </select>
+      </label>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <label>Reference pitch (A4)
+        <div class="stepper">
+          <button id="aDown" aria-label="Lower reference pitch">−</button>
+          <output id="aVal">440 Hz</output>
+          <button id="aUp" aria-label="Raise reference pitch">+</button>
+        </div>
+      </label>
+      <label>"In tune" range
+        <div class="stepper">
+          <button id="tDown" aria-label="Narrower in-tune range">−</button>
+          <output id="tVal">±5¢</output>
+          <button id="tUp" aria-label="Wider in-tune range">+</button>
+        </div>
+      </label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Play a reference pitch</h2>
+    <div class="ref-row">
+      <select id="refNote" aria-label="Reference note"></select>
+      <button id="refBtn">▶ Play</button>
+    </div>
+    <p class="hint" style="margin:10px 0 0">Note names follow the instrument key above, so a B♭ player picking “C” hears concert B♭.</p>
+  </section>
+</main>
+
+<script src="pitch.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const display = $('display'), noteEl = $('note'), statusEl = $('status'), adviceEl = $('advice');
+  const needle = $('needle'), centsEl = $('cents'), freqEl = $('freq'), zone = $('zone');
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('tuner.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('tuner.' + k, JSON.stringify(v)); } catch {} },
+  };
+
+  const settings = {
+    a4: store.get('a4', 440),
+    tol: store.get('tol', 5),
+    transpose: store.get('transpose', 0),
+  };
+
+  // ---- Meter ticks ----
+  const scale = $('scale');
+  for (let c = -50; c <= 50; c += 5) {
+    const t = document.createElement('div');
+    t.className = 'tick' + (c === 0 ? ' center' : c % 25 === 0 ? ' major' : '');
+    t.style.left = (50 + c) + '%';
+    scale.appendChild(t);
+  }
+
+  function renderSettings() {
+    $('aVal').textContent = settings.a4 + ' Hz';
+    $('tVal').textContent = '±' + settings.tol + '¢';
+    zone.style.width = (settings.tol * 2) + '%';
+    $('instrument').value = String(settings.transpose);
+    const opt = $('instrument').selectedOptions[0];
+    $('instLabel').textContent = settings.transpose === 0 ? 'Concert pitch' : opt.textContent.split(' (')[0] + ' instrument';
+    buildRefNotes();
+  }
+
+  // ---- Reference notes (written for the selected instrument) ----
+  const flats = () => true; // band music reads flats (B♭, E♭…)
+  function buildRefNotes() {
+    const sel = $('refNote');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    // Common band tuning notes first, then chromatic.
+    // Values are concert MIDI numbers; labels are written pitch for the instrument.
+    const common = [70, 65, 69, 58]; // concert Bb4, F4, A4, Bb3
+    const seen = new Set();
+    const add = (midi, group) => {
+      if (seen.has(midi)) return; seen.add(midi);
+      const n = Pitch.noteFromFrequency(Pitch.frequencyFromMidi(midi, settings.a4), settings.a4, settings.transpose, flats());
+      const o = document.createElement('option');
+      o.value = midi;
+      o.textContent = `${n.name}${n.octave}` + (settings.transpose ? `  (concert ${Pitch.NOTE_NAMES_FLAT[midi % 12]})` : '');
+      group.appendChild(o);
+    };
+    const g1 = document.createElement('optgroup'); g1.label = 'Tuning notes';
+    common.forEach((m) => add(m, g1));
+    const g2 = document.createElement('optgroup'); g2.label = 'All notes';
+    for (let m = 48; m <= 84; m++) add(m, g2);
+    sel.append(g1, g2);
+    if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  }
+
+  // ---- Audio ----
+  let ctx = null, analyser = null, stream = null, rafId = 0, buf = null;
+  let listening = false;
+
+  function ensureCtx() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+
+  async function start() {
+    $('error').style.display = 'none';
+    try {
+      ensureCtx();
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      const src = ctx.createMediaStreamSource(stream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 4096;
+      src.connect(analyser);
+      buf = new Float32Array(analyser.fftSize);
+      listening = true;
+      $('startBtn').textContent = 'Stop';
+      setIdle('Listening…', 'Play a long, steady note');
+      loop();
+    } catch (e) {
+      const msg = !navigator.mediaDevices ? 'Microphone needs a secure (https) page.'
+        : e.name === 'NotAllowedError' ? 'Microphone permission was blocked. Allow it in your browser settings and try again.'
+        : 'Could not start the microphone: ' + e.message;
+      $('error').textContent = msg;
+      $('error').style.display = 'block';
+    }
+  }
+
+  function stop() {
+    listening = false;
+    cancelAnimationFrame(rafId);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null; analyser = null;
+    $('startBtn').textContent = 'Start tuning';
+    setIdle('Ready', 'Tap Start, then play a long, steady note');
+  }
+
+  function setIdle(status, advice) {
+    display.className = 'card idle';
+    noteEl.textContent = '–';
+    statusEl.textContent = status;
+    adviceEl.textContent = advice;
+    centsEl.textContent = 'cents';
+    freqEl.textContent = '';
+    needle.style.left = '50%';
+  }
+
+  // Smoothing: median of recent readings, then exponential easing of cents
+  const recent = [];
+  let smoothCents = 0, lastMidi = null, silentFrames = 0;
+
+  function loop() {
+    if (!listening) return;
+    rafId = requestAnimationFrame(loop);
+    analyser.getFloatTimeDomainData(buf);
+    // Ignore our own reference tone while it plays
+    const f = refOsc ? -1 : Pitch.detectPitch(buf, ctx.sampleRate, { minFreq: 40, maxFreq: 2100 });
+
+    if (f <= 0) {
+      if (++silentFrames > 20) {
+        recent.length = 0; lastMidi = null;
+        setIdle(refOsc ? 'Reference playing' : 'Listening…', refOsc ? 'Stop the tone to tune' : 'Play a long, steady note');
+      }
+      return;
+    }
+    silentFrames = 0;
+    recent.push(f);
+    if (recent.length > 5) recent.shift();
+    const med = [...recent].sort((a, b) => a - b)[recent.length >> 1];
+
+    const n = Pitch.noteFromFrequency(med, settings.a4, settings.transpose, true);
+    if (n.midi !== lastMidi) { smoothCents = n.cents; lastMidi = n.midi; }
+    else smoothCents += (n.cents - smoothCents) * 0.35;
+
+    const c = smoothCents;
+    const st = Pitch.status(c, settings.tol);
+    display.className = 'card ' + st;
+    noteEl.innerHTML = `${n.name}<sub>${n.octave}</sub>`;
+    statusEl.textContent = st === 'in-tune' ? 'In tune' : st === 'flat' ? '♭ Flat' : '♯ Sharp';
+    adviceEl.textContent = st === 'in-tune' ? 'Nice — hold it there'
+      : st === 'flat' ? 'Too low · push your tuning slide / mouthpiece in'
+      : 'Too high · pull your tuning slide / mouthpiece out';
+    const clamped = Math.max(-50, Math.min(50, c));
+    needle.style.left = (50 + clamped) + '%';
+    centsEl.textContent = (c > 0 ? '+' : c < 0 ? '−' : '') + Math.abs(c).toFixed(0) + ' cents';
+    freqEl.textContent = `${med.toFixed(1)} Hz · target ${n.targetFreq.toFixed(1)} Hz (concert)`;
+  }
+
+  // ---- Reference tone ----
+  let refOsc = null, refGain = null;
+  function playRef() {
+    ensureCtx();
+    stopRef();
+    const midi = Number($('refNote').value);
+    refOsc = ctx.createOscillator();
+    refGain = ctx.createGain();
+    // A soft, slightly reedy tone that's easy to match by ear
+    const real = new Float32Array([0, 1, 0.35, 0.15, 0.08, 0.04]);
+    refOsc.setPeriodicWave(ctx.createPeriodicWave(real, new Float32Array(real.length)));
+    refOsc.frequency.value = Pitch.frequencyFromMidi(midi, settings.a4);
+    refGain.gain.setValueAtTime(0, ctx.currentTime);
+    refGain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 0.05);
+    refOsc.connect(refGain).connect(ctx.destination);
+    refOsc.start();
+    $('refBtn').textContent = '■ Stop';
+    $('refBtn').classList.add('playing');
+  }
+  function stopRef() {
+    if (!refOsc) return;
+    const o = refOsc, g = refGain;
+    g.gain.setValueAtTime(g.gain.value, ctx.currentTime);
+    g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.05);
+    o.stop(ctx.currentTime + 0.06);
+    refOsc = null; refGain = null;
+    $('refBtn').textContent = '▶ Play';
+    $('refBtn').classList.remove('playing');
+  }
+
+  // ---- Wire up ----
+  $('startBtn').onclick = () => (listening ? stop() : start());
+  $('refBtn').onclick = () => (refOsc ? stopRef() : playRef());
+  $('refNote').onchange = () => { if (refOsc) playRef(); };
+  $('instrument').onchange = (e) => { settings.transpose = Number(e.target.value); store.set('transpose', settings.transpose); renderSettings(); if (refOsc) playRef(); };
+  const bump = (key, d, min, max) => () => {
+    settings[key] = Math.max(min, Math.min(max, settings[key] + d));
+    store.set(key, settings[key]); renderSettings();
+    if (key === 'a4' && refOsc) playRef();
+  };
+  $('aDown').onclick = bump('a4', -1, 430, 450);
+  $('aUp').onclick = bump('a4', 1, 430, 450);
+  $('tDown').onclick = bump('tol', -1, 1, 20);
+  $('tUp').onclick = bump('tol', 1, 1, 20);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopRef(); });
+
+  renderSettings();
+})();
+</script>
+</body>
+</html>
