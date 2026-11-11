@@ -136,9 +136,17 @@
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .row > label { flex: 1 1 140px; display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--muted); }
   .row select { width: 100%; }
-  .stepper { display: flex; align-items: center; gap: 6px; }
-  .stepper button { width: 44px; padding: 0; }
-  .stepper output { min-width: 4.2em; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+  .setting { margin-top: 18px; }
+  .setting-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .setting-head span { font-size: 0.85rem; color: var(--muted); }
+  .setting-head output { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; }
+  .choices button { padding: 6px 4px; line-height: 1.15; font-weight: 600; }
+  .choices button small { display: block; font-weight: 400; font-size: 0.7rem; color: var(--muted); }
+  .choices button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .choices button[aria-pressed="true"] small { color: inherit; opacity: 0.8; }
+  .slider-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .slider-row input { flex: 1; accent-color: var(--good); height: 28px; }
   h2 { font-size: 0.95rem; margin: 0 0 12px; }
   .ref-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .ref-head h2 { margin-bottom: 4px; }
@@ -186,21 +194,27 @@
         <select id="instrument"></select>
       </label>
     </div>
-    <div class="row" style="margin-top:14px">
-      <label>Reference pitch (A4)
-        <div class="stepper">
-          <button id="aDown" aria-label="Lower reference pitch">−</button>
-          <output id="aVal">440 Hz</output>
-          <button id="aUp" aria-label="Raise reference pitch">+</button>
-        </div>
-      </label>
-      <label>"In tune" range
-        <div class="stepper">
-          <button id="tDown" aria-label="Narrower in-tune range">−</button>
-          <output id="tVal">±5¢</output>
-          <button id="tUp" aria-label="Wider in-tune range">+</button>
-        </div>
-      </label>
+    <div class="setting" role="group" aria-labelledby="aLabel">
+      <div class="setting-head"><span id="aLabel">Tuning standard (A =)</span><output id="aVal">440 Hz</output></div>
+      <div class="choices" id="aChoices">
+        <button data-a4="440">440<small>Standard</small></button>
+        <button data-a4="441">441<small>Some bands</small></button>
+        <button data-a4="442">442<small>Orchestras</small></button>
+        <button data-a4="443">443<small>Europe</small></button>
+      </div>
+      <div class="slider-row">
+        <span>430</span>
+        <input type="range" id="aSlider" min="430" max="450" step="1" value="440" aria-label="Tuning standard in hertz">
+        <span>450</span>
+      </div>
+    </div>
+    <div class="setting" role="group" aria-labelledby="tLabel">
+      <div class="setting-head"><span id="tLabel">How close counts as “in tune”</span><output id="tVal">±5 cents</output></div>
+      <div class="choices" id="tChoices">
+        <button data-tol="3">Strict<small>±3 cents</small></button>
+        <button data-tol="5">Normal<small>±5 cents</small></button>
+        <button data-tol="10">Relaxed<small>±10 cents</small></button>
+      </div>
     </div>
   </section>
 
@@ -232,7 +246,7 @@
 
   const settings = {
     a4: store.get('a4', 440),
-    tol: store.get('tol', 5),
+    tol: [3, 5, 10].reduce((best, t) => (Math.abs(t - store.get('tol', 5)) < Math.abs(best - store.get('tol', 5)) ? t : best), 5),
     instrument: Instruments.byId(store.get('instrument', 'concert')).id,
   };
   const inst = () => Instruments.byId(settings.instrument);
@@ -270,7 +284,10 @@
 
   function renderSettings() {
     $('aVal').textContent = settings.a4 + ' Hz';
-    $('tVal').textContent = '±' + settings.tol + '¢';
+    $('aSlider').value = settings.a4;
+    document.querySelectorAll('#aChoices button').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.a4) === settings.a4)));
+    $('tVal').textContent = '±' + settings.tol + ' cents';
+    document.querySelectorAll('#tChoices button').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.tol) === settings.tol)));
     zone.style.width = (settings.tol * 2) + '%';
     $('instrument').value = settings.instrument;
     $('instLabel').textContent = inst().id === 'concert' ? 'Concert pitch' : `${inst().name} · ${keyName(inst().transpose)}`;
@@ -448,17 +465,21 @@
     renderSettings();
     if (m !== null && m >= inst().range[0] && m <= inst().range[1]) playRef(m);
   };
-  const bump = (key, d, min, max) => () => {
-    settings[key] = Math.max(min, Math.min(max, settings[key] + d));
-    store.set(key, settings[key]);
+  function setA4(v, retune) {
+    settings.a4 = Math.max(430, Math.min(450, Math.round(v)));
+    store.set('a4', settings.a4);
     const m = playingMidi;
     renderSettings();
-    if (key === 'a4' && m !== null) playRef(m);
-  };
-  $('aDown').onclick = bump('a4', -1, 430, 450);
-  $('aUp').onclick = bump('a4', 1, 430, 450);
-  $('tDown').onclick = bump('tol', -1, 1, 20);
-  $('tUp').onclick = bump('tol', 1, 1, 20);
+    if (retune && m !== null) playRef(m); // re-sound the playing note at the new standard
+  }
+  document.querySelectorAll('#aChoices button').forEach((b) => (b.onclick = () => setA4(Number(b.dataset.a4), true)));
+  $('aSlider').oninput = (e) => setA4(Number(e.target.value), false); // live label while dragging
+  $('aSlider').onchange = (e) => setA4(Number(e.target.value), true); // retune once released
+  document.querySelectorAll('#tChoices button').forEach((b) => (b.onclick = () => {
+    settings.tol = Number(b.dataset.tol);
+    store.set('tol', settings.tol);
+    renderSettings();
+  }));
   document.addEventListener('visibilitychange', () => { if (document.hidden) stopRef(); });
 
   renderSettings();

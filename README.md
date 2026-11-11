@@ -7,7 +7,8 @@ A tuner for band musicians that runs in the browser. Play a note into your phone
 - **Flat / In tune / Sharp** readout with a cents meter and tips (push the slide in, pull it out)
 - **Pick your instrument**: woodwinds, brass and pitched percussion (timpani, marimba, xylophone, glockenspiel, vibraphone, chimes, crotales). Notes are shown as written for that instrument (B♭, E♭, F and octave transpositions), and the tuning tips match it (headjoint, barrel, mouthpiece, slide, timpani pedal…)
 - **Tap a pitch to hear it, in your instrument's sound**: a grid of every note in the instrument's range, plus quick tuning notes (concert B♭, F, A, E♭). Sounds are synthesized in the browser, and struck instruments like timpani and mallets keep re-striking while the note is on
-- Adjustable **A4 reference** (430–450 Hz) and **in-tune range** (±1–20 cents). Your settings are saved.
+- **Tuning standard**: one tap for A = 440, 441, 442 or 443 Hz, or slide anywhere from 430 to 450 Hz
+- **How strict**: Strict (±3 cents), Normal (±5) or Relaxed (±10). Your settings are saved.
 - Light and dark mode, sized for phones
 
 ## Use it
