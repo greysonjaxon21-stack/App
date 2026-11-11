@@ -140,9 +140,18 @@
   .stepper button { width: 44px; padding: 0; }
   .stepper output { min-width: 4.2em; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
   h2 { font-size: 0.95rem; margin: 0 0 12px; }
-  .ref-row { display: flex; gap: 10px; }
-  .ref-row select { flex: 1; }
-  .ref-row button { flex: 1; font-weight: 600; }
+  .ref-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .ref-head h2 { margin-bottom: 4px; }
+  .sublabel { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 6px; }
+  .notes { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; }
+  .notes.tuning { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+  .notes button { padding: 0 4px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .notes button small { display: block; font-weight: 400; font-size: 0.68rem; color: var(--muted); }
+  .notes button.playing small { color: inherit; }
+  .notes button.accidental { background: color-mix(in srgb, var(--line) 45%, var(--surface)); }
+  .notes button.playing { background: var(--good); color: #fff; border-color: var(--good); }
+  #stopRef { min-height: 36px; font-size: 0.85rem; }
+  #stopRef[hidden] { display: none; }
 
   #error { color: var(--sharp); font-size: 0.9rem; display: none; }
 </style>
@@ -173,13 +182,8 @@
 
   <section class="card">
     <div class="row">
-      <label>Instrument key
-        <select id="instrument">
-          <option value="0">Concert C (flute, oboe, trombone, tuba, mallets)</option>
-          <option value="2">B♭ (clarinet, trumpet, tenor sax, baritone T.C.)</option>
-          <option value="9">E♭ (alto sax, bari sax, E♭ clarinet)</option>
-          <option value="7">F (French horn)</option>
-        </select>
+      <label>Instrument
+        <select id="instrument"></select>
       </label>
     </div>
     <div class="row" style="margin-top:14px">
@@ -201,16 +205,20 @@
   </section>
 
   <section class="card">
-    <h2>Play a reference pitch</h2>
-    <div class="ref-row">
-      <select id="refNote" aria-label="Reference note"></select>
-      <button id="refBtn">▶ Play</button>
+    <div class="ref-head">
+      <h2>Tap a pitch to hear it</h2>
+      <button id="stopRef" hidden>■ Stop sound</button>
     </div>
-    <p class="hint" style="margin:10px 0 0">Note names follow the instrument key above, so a B♭ player picking “C” hears concert B♭.</p>
+    <p class="hint" style="margin:0" id="refHint"></p>
+    <div class="sublabel">Tuning notes</div>
+    <div class="notes tuning" id="tuningNotes"></div>
+    <div class="sublabel">All notes</div>
+    <div id="allNotes"></div>
   </section>
 </main>
 
 <script src="pitch.js"></script>
+<script src="instruments.js"></script>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -225,8 +233,9 @@
   const settings = {
     a4: store.get('a4', 440),
     tol: store.get('tol', 5),
-    transpose: store.get('transpose', 0),
+    instrument: Instruments.byId(store.get('instrument', 'concert')).id,
   };
+  const inst = () => Instruments.byId(settings.instrument);
 
   // ---- Meter ticks ----
   const scale = $('scale');
@@ -237,40 +246,77 @@
     scale.appendChild(t);
   }
 
+  // ---- Instrument picker ----
+  const groups = {};
+  for (const i of Instruments.INSTRUMENTS) {
+    if (!groups[i.group]) {
+      groups[i.group] = document.createElement('optgroup');
+      groups[i.group].label = i.group;
+      $('instrument').appendChild(groups[i.group]);
+    }
+    const o = document.createElement('option');
+    o.value = i.id;
+    o.textContent = i.name;
+    groups[i.group].appendChild(o);
+  }
+
+  function keyName(t) {
+    const pc = ((t % 12) + 12) % 12;
+    const key = { 0: 'C', 2: 'B♭', 9: 'E♭', 7: 'F', 10: 'D', 3: 'A' }[pc] || '';
+    if (t === 0) return 'Concert pitch';
+    if (pc === 0) return t < 0 ? `Sounds ${-t / 12 === 1 ? '1 octave' : -t / 12 + ' octaves'} higher than written` : 'Concert pitch';
+    return `${key} instrument`;
+  }
+
   function renderSettings() {
     $('aVal').textContent = settings.a4 + ' Hz';
     $('tVal').textContent = '±' + settings.tol + '¢';
     zone.style.width = (settings.tol * 2) + '%';
-    $('instrument').value = String(settings.transpose);
-    const opt = $('instrument').selectedOptions[0];
-    $('instLabel').textContent = settings.transpose === 0 ? 'Concert pitch' : opt.textContent.split(' (')[0] + ' instrument';
-    buildRefNotes();
+    $('instrument').value = settings.instrument;
+    $('instLabel').textContent = inst().id === 'concert' ? 'Concert pitch' : `${inst().name} · ${keyName(inst().transpose)}`;
+    $('refHint').textContent = inst().transpose === 0
+      ? `Plays a ${inst().name.toLowerCase()} sound at concert pitch.`
+      : `Notes are written for ${inst().name}; each one plays the matching concert pitch.`;
+    buildNotes();
   }
 
-  // ---- Reference notes (written for the selected instrument) ----
-  const flats = () => true; // band music reads flats (B♭, E♭…)
-  function buildRefNotes() {
-    const sel = $('refNote');
-    const prev = sel.value;
-    sel.innerHTML = '';
-    // Common band tuning notes first, then chromatic.
-    // Values are concert MIDI numbers; labels are written pitch for the instrument.
-    const common = [70, 65, 69, 58]; // concert Bb4, F4, A4, Bb3
-    const seen = new Set();
-    const add = (midi, group) => {
-      if (seen.has(midi)) return; seen.add(midi);
-      const n = Pitch.noteFromFrequency(Pitch.frequencyFromMidi(midi, settings.a4), settings.a4, settings.transpose, flats());
-      const o = document.createElement('option');
-      o.value = midi;
-      o.textContent = `${n.name}${n.octave}` + (settings.transpose ? `  (concert ${Pitch.NOTE_NAMES_FLAT[midi % 12]})` : '');
-      group.appendChild(o);
-    };
-    const g1 = document.createElement('optgroup'); g1.label = 'Tuning notes';
-    common.forEach((m) => add(m, g1));
-    const g2 = document.createElement('optgroup'); g2.label = 'All notes';
-    for (let m = 48; m <= 84; m++) add(m, g2);
-    sel.append(g1, g2);
-    if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  // ---- Note buttons (labelled as written for the selected instrument) ----
+  const written = (midi) => Pitch.noteFromFrequency(Pitch.frequencyFromMidi(midi, settings.a4), settings.a4, inst().transpose, true);
+  const concertName = (midi) => Pitch.NOTE_NAMES_BAND[midi % 12] + (Math.floor(midi / 12) - 1);
+
+  function noteButton(midi, withConcert) {
+    const n = written(midi);
+    const b = document.createElement('button');
+    b.dataset.midi = midi;
+    if (n.name.length > 1) b.classList.add('accidental');
+    b.innerHTML = `${n.name}${n.octave}` + (withConcert && inst().transpose ? `<small>concert ${concertName(midi)}</small>` : '');
+    b.setAttribute('aria-label', `Play ${n.name}${n.octave}` + (inst().transpose ? `, concert ${concertName(midi)}` : ''));
+    b.onclick = () => (playingMidi === midi ? stopRef() : playRef(midi));
+    if (playingMidi === midi) b.classList.add('playing');
+    return b;
+  }
+
+  function buildNotes() {
+    const i = inst();
+    const tn = $('tuningNotes');
+    tn.innerHTML = '';
+    Instruments.tuningNotes(i).forEach((m) => tn.appendChild(noteButton(m, true)));
+
+    // Group the full range into rows by written octave
+    const all = $('allNotes');
+    all.innerHTML = '';
+    let row = null, rowOct = null;
+    for (let m = i.range[0]; m <= i.range[1]; m++) {
+      const oct = written(m).octave;
+      if (oct !== rowOct) {
+        row = document.createElement('div');
+        row.className = 'notes';
+        row.style.marginTop = rowOct === null ? '0' : '6px';
+        all.appendChild(row);
+        rowOct = oct;
+      }
+      row.appendChild(noteButton(m, false));
+    }
   }
 
   // ---- Audio ----
@@ -327,6 +373,15 @@
     needle.style.left = '50%';
   }
 
+  // Detection range follows the instrument (tuba goes low, glockenspiel goes very high)
+  function detectRange() {
+    const [lo, hi] = inst().range;
+    return {
+      minFreq: Math.min(40, Pitch.frequencyFromMidi(lo, settings.a4) * 0.9),
+      maxFreq: Math.min(4600, Math.max(2100, Pitch.frequencyFromMidi(hi, settings.a4) * 1.1)),
+    };
+  }
+
   // Smoothing: median of recent readings, then exponential easing of cents
   const recent = [];
   let smoothCents = 0, lastMidi = null, silentFrames = 0;
@@ -336,12 +391,12 @@
     rafId = requestAnimationFrame(loop);
     analyser.getFloatTimeDomainData(buf);
     // Ignore our own reference tone while it plays
-    const f = refOsc ? -1 : Pitch.detectPitch(buf, ctx.sampleRate, { minFreq: 40, maxFreq: 2100 });
+    const f = refVoice ? -1 : Pitch.detectPitch(buf, ctx.sampleRate, detectRange());
 
     if (f <= 0) {
       if (++silentFrames > 20) {
         recent.length = 0; lastMidi = null;
-        setIdle(refOsc ? 'Reference playing' : 'Listening…', refOsc ? 'Stop the tone to tune' : 'Play a long, steady note');
+        setIdle(refVoice ? 'Reference playing' : 'Listening…', refVoice ? 'Stop the sound to tune' : 'Play a long, steady note');
       }
       return;
     }
@@ -350,7 +405,7 @@
     if (recent.length > 5) recent.shift();
     const med = [...recent].sort((a, b) => a - b)[recent.length >> 1];
 
-    const n = Pitch.noteFromFrequency(med, settings.a4, settings.transpose, true);
+    const n = Pitch.noteFromFrequency(med, settings.a4, inst().transpose, true);
     if (n.midi !== lastMidi) { smoothCents = n.cents; lastMidi = n.midi; }
     else smoothCents += (n.cents - smoothCents) * 0.35;
 
@@ -359,54 +414,46 @@
     display.className = 'card ' + st;
     noteEl.innerHTML = `${n.name}<sub>${n.octave}</sub>`;
     statusEl.textContent = st === 'in-tune' ? 'In tune' : st === 'flat' ? '♭ Flat' : '♯ Sharp';
-    adviceEl.textContent = st === 'in-tune' ? 'Nice — hold it there'
-      : st === 'flat' ? 'Too low · push your tuning slide / mouthpiece in'
-      : 'Too high · pull your tuning slide / mouthpiece out';
+    adviceEl.textContent = st === 'in-tune' ? 'Nice — hold it there' : inst().advice[st];
     const clamped = Math.max(-50, Math.min(50, c));
     needle.style.left = (50 + clamped) + '%';
     centsEl.textContent = (c > 0 ? '+' : c < 0 ? '−' : '') + Math.abs(c).toFixed(0) + ' cents';
-    freqEl.textContent = `${med.toFixed(1)} Hz · target ${n.targetFreq.toFixed(1)} Hz (concert)`;
+    freqEl.textContent = `${med.toFixed(1)} Hz · target ${n.targetFreq.toFixed(1)} Hz (concert ${concertName(n.midi)})`;
   }
 
-  // ---- Reference tone ----
-  let refOsc = null, refGain = null;
-  function playRef() {
+  // ---- Reference tone in the selected instrument's sound ----
+  let refVoice = null, playingMidi = null;
+  function playRef(midi) {
     ensureCtx();
     stopRef();
-    const midi = Number($('refNote').value);
-    refOsc = ctx.createOscillator();
-    refGain = ctx.createGain();
-    // A soft, slightly reedy tone that's easy to match by ear
-    const real = new Float32Array([0, 1, 0.35, 0.15, 0.08, 0.04]);
-    refOsc.setPeriodicWave(ctx.createPeriodicWave(real, new Float32Array(real.length)));
-    refOsc.frequency.value = Pitch.frequencyFromMidi(midi, settings.a4);
-    refGain.gain.setValueAtTime(0, ctx.currentTime);
-    refGain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 0.05);
-    refOsc.connect(refGain).connect(ctx.destination);
-    refOsc.start();
-    $('refBtn').textContent = '■ Stop';
-    $('refBtn').classList.add('playing');
+    playingMidi = midi;
+    refVoice = Instruments.playTone(ctx, ctx.destination, inst(), Pitch.frequencyFromMidi(midi, settings.a4));
+    document.querySelectorAll('.notes button').forEach((b) => b.classList.toggle('playing', Number(b.dataset.midi) === midi));
+    $('stopRef').hidden = false;
   }
   function stopRef() {
-    if (!refOsc) return;
-    const o = refOsc, g = refGain;
-    g.gain.setValueAtTime(g.gain.value, ctx.currentTime);
-    g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.05);
-    o.stop(ctx.currentTime + 0.06);
-    refOsc = null; refGain = null;
-    $('refBtn').textContent = '▶ Play';
-    $('refBtn').classList.remove('playing');
+    if (refVoice) refVoice.stop();
+    refVoice = null; playingMidi = null;
+    document.querySelectorAll('.notes button.playing').forEach((b) => b.classList.remove('playing'));
+    $('stopRef').hidden = true;
   }
 
   // ---- Wire up ----
   $('startBtn').onclick = () => (listening ? stop() : start());
-  $('refBtn').onclick = () => (refOsc ? stopRef() : playRef());
-  $('refNote').onchange = () => { if (refOsc) playRef(); };
-  $('instrument').onchange = (e) => { settings.transpose = Number(e.target.value); store.set('transpose', settings.transpose); renderSettings(); if (refOsc) playRef(); };
+  $('stopRef').onclick = stopRef;
+  $('instrument').onchange = (e) => {
+    const m = playingMidi;
+    settings.instrument = e.target.value; store.set('instrument', settings.instrument);
+    stopRef();
+    renderSettings();
+    if (m !== null && m >= inst().range[0] && m <= inst().range[1]) playRef(m);
+  };
   const bump = (key, d, min, max) => () => {
     settings[key] = Math.max(min, Math.min(max, settings[key] + d));
-    store.set(key, settings[key]); renderSettings();
-    if (key === 'a4' && refOsc) playRef();
+    store.set(key, settings[key]);
+    const m = playingMidi;
+    renderSettings();
+    if (key === 'a4' && m !== null) playRef(m);
   };
   $('aDown').onclick = bump('a4', -1, 430, 450);
   $('aUp').onclick = bump('a4', 1, 430, 450);

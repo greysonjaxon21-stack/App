@@ -62,6 +62,11 @@ test('concert Bb shows as F for F horn', () => {
   const n = P.noteFromFrequency(466.16, 440, 7, true);
   assert.strictEqual(n.name, 'F');
 });
+test('band spelling: concert A is F♯ for E♭ instruments, B for B♭', () => {
+  assert.strictEqual(P.noteFromFrequency(440, 440, 9, true).name, 'F♯');
+  assert.strictEqual(P.noteFromFrequency(440, 440, 2, true).name, 'B');
+  assert.strictEqual(P.noteFromFrequency(466.16, 440, 0, true).name, 'B♭');
+});
 test('A=442 reference shifts the target', () => {
   const n = P.noteFromFrequency(442, 442, 0);
   assert.strictEqual(n.name, 'A'); assert(Math.abs(n.cents) < 1e-9);
