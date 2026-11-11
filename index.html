@@ -158,6 +158,14 @@
   .notes button.playing small { color: inherit; }
   .notes button.accidental { background: color-mix(in srgb, var(--line) 45%, var(--surface)); }
   .notes button.playing { background: var(--good); color: #fff; border-color: var(--good); }
+  .notes.chromatic { grid-template-columns: repeat(6, 1fr); }
+  @media (min-width: 480px) { .notes.chromatic { grid-template-columns: repeat(12, 1fr); } }
+  .notes.chromatic button { min-height: 52px; font-size: 1.05rem; padding: 0; }
+  .notes button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .octave-bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .octave-bar output { font-weight: 700; text-align: center; min-width: 6em; font-variant-numeric: tabular-nums; }
+  .octave-bar button { font-weight: 600; }
+  .octave-bar button:disabled { opacity: 0.35; cursor: not-allowed; }
   #stopRef { min-height: 36px; font-size: 0.85rem; }
   #stopRef[hidden] { display: none; }
 
@@ -226,8 +234,13 @@
     <p class="hint" style="margin:0" id="refHint"></p>
     <div class="sublabel">Tuning notes</div>
     <div class="notes tuning" id="tuningNotes"></div>
-    <div class="sublabel">All notes</div>
-    <div id="allNotes"></div>
+    <div class="sublabel">Chromatic scale</div>
+    <div class="octave-bar" role="group" aria-label="Octave">
+      <button id="octDown" aria-label="One octave lower">▼ Lower</button>
+      <output id="octVal" aria-live="polite">Octave 4</output>
+      <button id="octUp" aria-label="One octave higher">Higher ▲</button>
+    </div>
+    <div class="notes chromatic" id="chromatic"></div>
   </section>
 </main>
 
@@ -301,12 +314,12 @@
   const written = (midi) => Pitch.noteFromFrequency(Pitch.frequencyFromMidi(midi, settings.a4), settings.a4, inst().transpose, true);
   const concertName = (midi) => Pitch.NOTE_NAMES_BAND[midi % 12] + (Math.floor(midi / 12) - 1);
 
-  function noteButton(midi, withConcert) {
+  function noteButton(midi, withConcert, nameOnly) {
     const n = written(midi);
     const b = document.createElement('button');
     b.dataset.midi = midi;
     if (n.name.length > 1) b.classList.add('accidental');
-    b.innerHTML = `${n.name}${n.octave}` + (withConcert && inst().transpose ? `<small>concert ${concertName(midi)}</small>` : '');
+    b.innerHTML = (nameOnly ? n.name : `${n.name}${n.octave}`) + (withConcert && inst().transpose ? `<small>concert ${concertName(midi)}</small>` : '');
     b.setAttribute('aria-label', `Play ${n.name}${n.octave}` + (inst().transpose ? `, concert ${concertName(midi)}` : ''));
     b.onclick = () => (playingMidi === midi ? stopRef() : playRef(midi));
     if (playingMidi === midi) b.classList.add('playing');
@@ -319,21 +332,43 @@
     tn.innerHTML = '';
     Instruments.tuningNotes(i).forEach((m) => tn.appendChild(noteButton(m, true)));
 
-    // Group the full range into rows by written octave
-    const all = $('allNotes');
-    all.innerHTML = '';
-    let row = null, rowOct = null;
-    for (let m = i.range[0]; m <= i.range[1]; m++) {
-      const oct = written(m).octave;
-      if (oct !== rowOct) {
-        row = document.createElement('div');
-        row.className = 'notes';
-        row.style.marginTop = rowOct === null ? '0' : '6px';
-        all.appendChild(row);
-        rowOct = oct;
+    buildChromatic();
+  }
+
+  // ---- Chromatic scale: 12 buttons (C to B, as written) for one octave at a time ----
+  let octave = null; // written octave shown in the chromatic row
+  function octaveLimits() {
+    const [lo, hi] = inst().range, t = inst().transpose;
+    return [Math.floor((lo + t) / 12) - 1, Math.floor((hi + t) / 12) - 1];
+  }
+  function defaultOctave() {
+    // Start in the octave of the instrument's main tuning note (concert B♭ near mid-range)
+    const first = Instruments.tuningNotes(inst())[0];
+    return written(first).octave;
+  }
+  function buildChromatic() {
+    const [omin, omax] = octaveLimits();
+    if (octave === null || octave < omin || octave > omax) octave = defaultOctave();
+    $('octVal').textContent = 'Octave ' + octave;
+    $('octDown').disabled = octave <= omin;
+    $('octUp').disabled = octave >= omax;
+    const row = $('chromatic');
+    row.innerHTML = '';
+    const [lo, hi] = inst().range;
+    for (let pc = 0; pc < 12; pc++) {
+      const concert = (octave + 1) * 12 + pc - inst().transpose; // written note -> concert pitch
+      const b = noteButton(concert, false, true);
+      if (concert < lo || concert > hi) {
+        b.disabled = true;
+        b.title = 'Outside this instrument\'s range';
       }
-      row.appendChild(noteButton(m, false));
+      row.appendChild(b);
     }
+  }
+  function shiftOctave(d) {
+    const [omin, omax] = octaveLimits();
+    octave = Math.max(omin, Math.min(omax, octave + d));
+    buildChromatic();
   }
 
   // ---- Audio ----
@@ -458,9 +493,12 @@
   // ---- Wire up ----
   $('startBtn').onclick = () => (listening ? stop() : start());
   $('stopRef').onclick = stopRef;
+  $('octDown').onclick = () => shiftOctave(-1);
+  $('octUp').onclick = () => shiftOctave(1);
   $('instrument').onchange = (e) => {
     const m = playingMidi;
     settings.instrument = e.target.value; store.set('instrument', settings.instrument);
+    octave = null;
     stopRef();
     renderSettings();
     if (m !== null && m >= inst().range[0] && m <= inst().range[1]) playRef(m);
