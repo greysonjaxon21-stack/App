@@ -61,7 +61,44 @@
   }
 
   /* Display */
-  #display { text-align: center; position: relative; }
+  #display { text-align: center; position: relative; overflow: hidden; }
+
+  /* Target note chip */
+  #target {
+    display: none; align-items: center; justify-content: center; gap: 8px;
+    margin: -6px auto 12px; padding: 4px 6px 4px 14px; width: fit-content;
+    border: 1px solid var(--line); border-radius: 999px; font-size: 0.9rem;
+  }
+  #target.on { display: flex; }
+  #target strong { font-variant-numeric: tabular-nums; }
+  #target .got { display: none; color: var(--good); font-weight: 700; }
+  #target.done { border-color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+  #target.done .got { display: inline; }
+  #target button { min-height: 32px; height: 32px; width: 32px; padding: 0; border-radius: 50%; border: none; background: transparent; color: var(--muted); font-size: 1.1rem; }
+
+  /* Big check mark when you hit the target */
+  #check {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    z-index: 5;
+  }
+  #check.show { opacity: 1; }
+  #check .circle {
+    width: 132px; height: 132px; border-radius: 50%; background: var(--good);
+    display: flex; align-items: center; justify-content: center;
+    transform: scale(0.4); transition: transform 0.35s cubic-bezier(0.2, 1.6, 0.4, 1);
+    box-shadow: 0 8px 30px color-mix(in srgb, var(--good) 45%, transparent);
+  }
+  #check.show .circle { transform: scale(1); }
+  #check svg { width: 76px; height: 76px; }
+  #check path { stroke-dasharray: 60; stroke-dashoffset: 60; transition: stroke-dashoffset 0.35s 0.12s ease-out; }
+  #check.show path { stroke-dashoffset: 0; }
+  #check .msg { font-size: 1.5rem; font-weight: 800; color: var(--good); letter-spacing: 0.04em; }
+  #check .sub { color: var(--muted); margin-top: -6px; }
+  @media (prefers-reduced-motion: reduce) { #check .circle, #check path { transition: none; } }
+
+  .notes button.target:not(.playing) { box-shadow: inset 0 0 0 2px var(--good); }
   #note {
     font-size: clamp(5rem, 28vw, 8.5rem);
     font-weight: 700;
@@ -180,6 +217,7 @@
   </header>
 
   <section class="card idle" id="display" aria-live="polite">
+    <div id="target"><span>Target <strong id="targetName"></strong></span><span class="got">✓ Got it</span><button id="clearTarget" aria-label="Clear target note">×</button></div>
     <div id="note">–</div>
     <div id="status">Ready</div>
     <div id="advice">Tap Start, then play a long, steady note</div>
@@ -191,6 +229,11 @@
     <div class="labels" aria-hidden="true"><span>−50</span><span>−25</span><span>0</span><span>+25</span><span>+50</span></div>
     <div id="cents">cents</div>
     <div id="freq"></div>
+    <div id="check" aria-hidden="true">
+      <div class="circle"><svg viewBox="0 0 52 52"><path d="M14 27 l8 8 l16 -18" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="msg">You got it!</div>
+      <div class="sub" id="checkSub"></div>
+    </div>
   </section>
 
   <button class="primary" id="startBtn">Start tuning</button>
@@ -232,6 +275,7 @@
       <button id="stopRef" hidden>■ Stop sound</button>
     </div>
     <p class="hint" style="margin:0" id="refHint"></p>
+    <p class="hint" style="margin:6px 0 0">The note you tap becomes your <strong>target</strong>. Play it in tune to get a ✓.</p>
     <div class="sublabel">Tuning notes</div>
     <div class="notes tuning" id="tuningNotes"></div>
     <div class="sublabel">Chromatic scale</div>
@@ -323,6 +367,7 @@
     b.setAttribute('aria-label', `Play ${n.name}${n.octave}` + (inst().transpose ? `, concert ${concertName(midi)}` : ''));
     b.onclick = () => (playingMidi === midi ? stopRef() : playRef(midi));
     if (playingMidi === midi) b.classList.add('playing');
+    if (targetMidi === midi) b.classList.add('target');
     return b;
   }
 
@@ -456,10 +501,14 @@
     // Ignore our own reference tone while it plays
     const f = refVoice ? -1 : Pitch.detectPitch(buf, ctx.sampleRate, detectRange());
 
+    if (performance.now() < muteUntil) return; // don't hear our own success chime
+
     if (f <= 0) {
+      holdStart = 0;
       if (++silentFrames > 20) {
+        armed = true; // stopped playing -> ready to celebrate again
         recent.length = 0; lastMidi = null;
-        setIdle(refVoice ? 'Reference playing' : 'Listening…', refVoice ? 'Stop the sound to tune' : 'Play a long, steady note');
+        setIdle(refVoice ? 'Listen…' : 'Listening…', refVoice ? 'Then play it back on your instrument' : (targetMidi !== null ? `Play ${writtenName(targetMidi)} and hold it in tune` : 'Play a long, steady note'));
       }
       return;
     }
@@ -478,23 +527,97 @@
     noteEl.innerHTML = `${n.name}<sub>${n.octave}</sub>`;
     statusEl.textContent = st === 'in-tune' ? 'In tune' : st === 'flat' ? '♭ Flat' : '♯ Sharp';
     adviceEl.textContent = st === 'in-tune' ? 'Nice — hold it there' : inst().advice[st];
+    checkTarget(n, c, st);
     const clamped = Math.max(-50, Math.min(50, c));
     needle.style.left = (50 + clamped) + '%';
     centsEl.textContent = (c > 0 ? '+' : c < 0 ? '−' : '') + Math.abs(c).toFixed(0) + ' cents';
     freqEl.textContent = `${med.toFixed(1)} Hz · target ${n.targetFreq.toFixed(1)} Hz (concert ${concertName(n.midi)})`;
   }
 
+  // ---- Target note: tap a pitch, then play it; hold it in tune to get the check mark ----
+  let targetMidi = null, holdStart = 0, offSince = 0, armed = true, muteUntil = 0, checkTimer = 0;
+  const HOLD_MS = 600; // how long to hold the note in tune
+  const writtenName = (midi) => { const w = written(midi); return `${w.name}${w.octave}`; };
+
+  function setTarget(midi) {
+    targetMidi = midi;
+    holdStart = 0; armed = true;
+    const chip = $('target');
+    chip.classList.toggle('on', midi !== null);
+    chip.classList.remove('done');
+    if (midi !== null) {
+      $('targetName').textContent = writtenName(midi) + (inst().transpose ? ` (concert ${concertName(midi)})` : '');
+    }
+    document.querySelectorAll('.notes button').forEach((b) => b.classList.toggle('target', Number(b.dataset.midi) === midi));
+  }
+
+  function checkTarget(n, c, st) {
+    if (targetMidi === null) return;
+    const now = performance.now();
+    if (n.midi === targetMidi && st === 'in-tune') {
+      offSince = 0;
+      if (!holdStart) holdStart = now;
+      if (armed && now - holdStart >= HOLD_MS) { armed = false; celebrate(); }
+      return;
+    }
+    holdStart = 0;
+    // Re-arm once you've clearly left the note for a moment
+    if (n.midi !== targetMidi || Math.abs(c) > settings.tol * 2) {
+      if (!offSince) offSince = now;
+      if (now - offSince > 400) armed = true;
+    }
+    if (n.midi !== targetMidi) {
+      const sameLetter = (n.midi - targetMidi) % 12 === 0;
+      adviceEl.textContent = sameLetter
+        ? `Right note, wrong octave · aim for ${writtenName(targetMidi)}`
+        : `You're on ${n.name}${n.octave} · aim for ${writtenName(targetMidi)}`;
+    }
+  }
+
+  function celebrate() {
+    $('target').classList.add('done');
+    $('checkSub').textContent = writtenName(targetMidi) + ' in tune';
+    const chk = $('check');
+    chk.classList.add('show');
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(() => chk.classList.remove('show'), 1600);
+    playChime();
+    try { navigator.vibrate && navigator.vibrate([40, 60, 40]); } catch (e) {}
+  }
+
+  // Short, bright two-note "checkpoint" chime
+  function playChime() {
+    ensureCtx();
+    muteUntil = performance.now() + 900;
+    const t = ctx.currentTime + 0.01;
+    [[1046.5, 0], [1568, 0.11]].forEach(([f, dt]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0, t + dt);
+      g.gain.linearRampToValueAtTime(0.25, t + dt + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.45);
+      o.connect(g).connect(ctx.destination);
+      o.start(t + dt);
+      o.stop(t + dt + 0.5);
+    });
+  }
+
   // ---- Reference tone in the selected instrument's sound ----
-  let refVoice = null, playingMidi = null;
+  let refVoice = null, playingMidi = null, refTimer = 0;
   function playRef(midi) {
     ensureCtx();
     stopRef();
     playingMidi = midi;
+    setTarget(midi);
+    // While tuning, the reference plays briefly then stops so the mic can hear you
+    if (listening) refTimer = setTimeout(stopRef, 2000);
     refVoice = Instruments.playTone(ctx, ctx.destination, inst(), Pitch.frequencyFromMidi(midi, settings.a4));
     document.querySelectorAll('.notes button').forEach((b) => b.classList.toggle('playing', Number(b.dataset.midi) === midi));
     $('stopRef').hidden = false;
   }
   function stopRef() {
+    clearTimeout(refTimer);
     if (refVoice) refVoice.stop();
     refVoice = null; playingMidi = null;
     document.querySelectorAll('.notes button.playing').forEach((b) => b.classList.remove('playing'));
@@ -504,15 +627,19 @@
   // ---- Wire up ----
   $('startBtn').onclick = () => (listening ? stop() : start());
   $('stopRef').onclick = stopRef;
+  $('clearTarget').onclick = () => setTarget(null);
   $('octDown').onclick = () => shiftOctave(-1);
   $('octUp').onclick = () => shiftOctave(1);
   $('instrument').onchange = (e) => {
     const m = playingMidi;
     settings.instrument = e.target.value; store.set('instrument', settings.instrument);
     octave = null;
+    const t = targetMidi;
     stopRef();
     renderSettings();
-    if (m !== null && m >= inst().range[0] && m <= inst().range[1]) playRef(m);
+    const inRange = (x) => x !== null && x >= inst().range[0] && x <= inst().range[1];
+    setTarget(inRange(t) ? t : null); // relabel for the new instrument, or clear if it can't play it
+    if (inRange(m)) playRef(m);
   };
   function setA4(v, retune) {
     settings.a4 = Math.max(430, Math.min(450, Math.round(v)));
